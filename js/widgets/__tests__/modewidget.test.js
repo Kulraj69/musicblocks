@@ -303,6 +303,14 @@ describe("ModeWidget", () => {
             logo: {
                 modeBlock: 1,
                 resetSynth: jest.fn(),
+                // Mirrors Logo.setUserTemperament(): the widget must leave the
+                // synth on the tuning the learner just picked, and mark the
+                // change so the frequency tables are rebuilt (see #9627).
+                setUserTemperament: jest.fn(key => {
+                    mockActivity.logo._userTemperament = key;
+                    mockActivity.logo.synth.inTemperament = key;
+                    mockActivity.logo.synth.changeInTemperament = true;
+                }),
                 synth: {
                     trigger: jest.fn(),
                     stop: jest.fn()
@@ -630,6 +638,35 @@ describe("ModeWidget", () => {
 
             expect(modeWidget._activeEDO).toBe(12);
             expect(modeWidget._selectedNotes).toEqual(twelveEdoNotes);
+
+            global.getCurrentEDO = savedGetCurrentEDO;
+            global.TEMPERAMENT = savedTemperament;
+        });
+
+        test("leaves the synth on the chosen tuning and marks the change", () => {
+            modeWidget._activeTemperamentKey = "equal";
+            modeWidget.logo.synth.inTemperament = "equal";
+            modeWidget._activeEDO = 12;
+            modeWidget._selectedNotes = new Array(12).fill(false);
+            modeWidget._edoNoteCache = {};
+            const select = prepareSelect(modeWidget);
+
+            const savedGetCurrentEDO = global.getCurrentEDO;
+            const savedTemperament = global.TEMPERAMENT;
+            global.getCurrentEDO = jest.fn(key => (key === "equal19" ? 19 : 12));
+            global.TEMPERAMENT = {
+                ...savedTemperament,
+                equal19: { isEDO: true, pitchNumber: 19 }
+            };
+
+            fireEdoChange(select, "equal19");
+
+            // Writing synth.inTemperament directly left changeInTemperament
+            // false, so the next note played at the previous tuning's
+            // frequencies (#9627).
+            expect(mockActivity.logo.setUserTemperament).toHaveBeenCalledWith("equal19");
+            expect(mockActivity.logo.synth.inTemperament).toBe("equal19");
+            expect(mockActivity.logo.synth.changeInTemperament).toBe(true);
 
             global.getCurrentEDO = savedGetCurrentEDO;
             global.TEMPERAMENT = savedTemperament;
@@ -1008,6 +1045,44 @@ describe("ModeWidget", () => {
 
         expect(saveSpy).toHaveBeenCalledWith("dorian", [2, 1, 2, 2, 2, 1, 2], 12, "equal");
         saveSpy.mockRestore();
+    });
+
+    test("hands an imported mode's tuning to the synth", () => {
+        const saveSpy = jest.spyOn(modeWidget, "_saveCustomMode").mockReturnValue(true);
+        global.readTextFile = jest.fn((_inputId, cb) => {
+            cb(null, {
+                text: JSON.stringify({ name: "dorian", edo: 12, pattern: [2, 1, 2, 2, 2, 1, 2] }),
+                file: { name: "dorian.json", size: 100 }
+            });
+        });
+        jest.spyOn(modeWidget, "_temperamentKeyForEDO").mockReturnValue("equal");
+        jest.spyOn(modeWidget, "_cacheState").mockImplementation(() => {});
+        jest.spyOn(modeWidget, "_rebuildWheel").mockImplementation(() => {});
+        jest.spyOn(modeWidget, "_applyModePattern").mockImplementation(() => {});
+        jest.spyOn(modeWidget, "_updateModeDisplay").mockImplementation(() => {});
+
+        modeWidget._importFile();
+
+        // _rebuildWheel is stubbed here, so this only passes if
+        // _applyImportedMode itself tells the synth about the new tuning.
+        expect(mockActivity.logo.setUserTemperament).toHaveBeenCalledWith("equal");
+        expect(mockActivity.logo.synth.changeInTemperament).toBe(true);
+        saveSpy.mockRestore();
+    });
+
+    test("the real Logo.setUserTemperament() sets the fields the tests above rely on", () => {
+        const { Logo } = require("../../logo.js");
+        const logo = {
+            _userTemperament: null,
+            synth: { inTemperament: "equal", startingPitch: "C4", changeInTemperament: false }
+        };
+
+        Logo.prototype.setUserTemperament.call(logo, "equal19");
+
+        // Pins the mocked contract in this file to the real implementation.
+        expect(logo._userTemperament).toBe("equal19");
+        expect(logo.synth.inTemperament).toBe("equal19");
+        expect(logo.synth.changeInTemperament).toBe(true);
     });
 
     test("should import a .scl file and detect EDO", () => {

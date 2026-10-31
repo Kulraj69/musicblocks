@@ -436,7 +436,7 @@ class ModeWidget {
             }
 
             this._activeTemperamentKey = key;
-            this.logo.synth.inTemperament = key;
+            this.logo.setUserTemperament(key);
 
             // _translateNotesToEDO() and _restoreState() must run while
             // this._activeEDO still holds the OLD EDO: _translateNotesToEDO
@@ -513,7 +513,14 @@ class ModeWidget {
                 ? this._activeTemperamentKey
                 : this._temperamentKeyForEDO(edoCount);
         this._activeTemperamentKey = key;
-        this.logo.synth.inTemperament = key;
+        // Every tuning change in this widget ends up here. Assigning
+        // synth.inTemperament alone left the synth on the previous tuning:
+        // the frequency tables are rebuilt only when changeInTemperament is
+        // set, and runLogoCommands() restores inTemperament from
+        // _userTemperament at the start of every run. setUserTemperament()
+        // sets all three, which is what the Temperament widget does for the
+        // same change (see js/widgets/temperament.js).
+        this.logo.setUserTemperament(key);
         this._activeEDO = edoCount;
         if (select) {
             const label = isEquallyTempered(key)
@@ -1684,7 +1691,7 @@ class ModeWidget {
     _applyImportedMode(foundEdo, foundPattern, name) {
         const key = this._temperamentKeyForEDO(foundEdo);
         this._cacheState(this._activeEDO);
-        this.logo.synth.inTemperament = key;
+        this.logo.setUserTemperament(key);
         this._activeTemperamentKey = key;
         this._rebuildWheel(foundEdo);
         this._applyModePattern(foundPattern);
